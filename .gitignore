@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# 运行时数据
+data/
+domains.json
+state.json
+hosts.txt
+nets.txt
+*.log
+*.pid
+
+# fpk 产物（由 CI 或 build-fpk.sh 生成）
+fpk/cfopt.fpk
+fpk/app/src/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 系统
+.env

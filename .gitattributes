@@ -1,0 +1,22 @@
+# 换行符策略：Linux 脚本必须是 LF，否则在飞牛/fnOS 上会报
+# "bad interpreter: /bin/bash^M: no such file or directory"
+* text=auto eol=lf
+
+# 明确指定这些必须是 LF（Windows 上 clone 也不能转 CRLF）
+*.sh        text eol=lf
+*.py        text eol=lf
+Dockerfile  text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+
+# fpk 生命周期脚本和配置：没有扩展名，逐个声明
+fpk/cmd/*        text eol=lf
+fpk/manifest     text eol=lf
+fpk/config/*     text eol=lf
+fpk/app/ui/config text eol=lf
+
+# 图片二进制，不做换行处理
+*.png binary
+*.PNG binary
+*.fpk binary

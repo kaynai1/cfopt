@@ -1,0 +1,33 @@
+﻿[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cfopt"
+version = "2.1.0"
+description = "Cloudflare 边缘 IP 优选：按落地机房筛选并下发 DNS"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "cfopt contributors" }]
+keywords = ["cloudflare", "dns", "tunnel", "optimize", "anycast"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Internet :: Name Service (DNS)",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/kaynai1/cfopt"
+Source = "https://github.com/kaynai1/cfopt"
+
+[project.scripts]
+cfopt = "cfopt.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

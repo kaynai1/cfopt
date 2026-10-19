@@ -1,0 +1,70 @@
+# DNS 模式：起一个 DNS 服务，把其他设备的 DNS 指过来
+#
+# 和 docker-compose.single.yml（hosts 模式）的区别：
+#   hosts 模式：只改本机 /etc/hosts，不占端口，容器挂了也不影响上网
+#   DNS 模式  ：对外提供 DNS 解析，多设备可用，但要占端口
+#
+# 注意：DNS 模式必须用 host 网络，且 53 端口不能被飞牛OS 自带 DNS 占用。
+# 如果只想让这一台机器用，请改用 docker-compose.single.yml。
+#
+# 用法：
+#   docker compose -f docker-compose.yml up -d --build
+#   浏览器打开 http://飞牛OS的IP:8080/ 添加域名
+#   然后把其他设备的 DNS 指向飞牛OS 的 IP
+
+services:
+  cfopt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cfopt:local
+    container_name: cfopt
+    restart: unless-stopped
+
+    # 关键：用 host 网络，但只监听回环地址。
+    # 如果换成 bridge + ports 映射，容器里的 127.0.0.1 是容器自己的回环，
+    # 宿主机访问不到，会连不上。所以这里仍然需要 host 网络。
+    network_mode: host
+
+    environment:
+      # 多域名模式：域名在 Web 面板里添加，这里不用填
+      # （想预置一个的话取消下面两行注释）
+      # TARGET_HOST: "ai2.kdns.fr"
+      # COLOS: "HKG"
+
+      # ===== 扫描默认值（每个域名可在面板单独调整） =====
+      PER_NET: "2"
+      WORKERS: "120"
+      INTERVAL: "21600"
+      TOP_N: "3"
+      TIMEOUT: "4"
+
+      # ===== DNS 监听 =====
+      # 改成 0.0.0.0:53 才能给其他设备用；127.0.0.1:5353 只有本机可用
+      DNS_LISTEN: "0.0.0.0:53"
+
+      # ===== 上游 =====
+      UPSTREAMS: "223.5.5.5:53,119.29.29.29:53"
+
+      # ===== 面板 =====
+      HTTP_PORT: "8080"
+
+      # 绑定失败直接退出，不要"看起来在跑其实没生效"
+      FAIL_FAST: "1"
+
+    volumes:
+      - ./data:/data
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

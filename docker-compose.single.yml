@@ -1,0 +1,73 @@
+# 飞牛OS 部署：Cloudflare 多域名优选管理面板
+#
+# hosts 模式：只改本机 /etc/hosts，不占端口。
+# - 不占 53 端口，不会和飞牛OS 自带的 DNS 打架
+# - 容器挂了也不影响上网，hosts 里的解析依然有效
+# - 不需要 host 网络，不需要 NET_BIND_SERVICE
+#
+# 用法：
+#   1. docker compose -f docker-compose.single.yml up -d
+#   2. 浏览器打开 http://飞牛OS的IP:8080/ 添加你的域名
+#   3. 添加后自动扫描并写入 /etc/hosts
+#   4. 验证：getent hosts 你的域名   （应返回香港 IP）
+
+services:
+  cfopt:
+    # 两个来源二选一：
+    #   A. 本地构建（推荐先这样用，不需要 GitHub）
+    #      docker compose -f docker-compose.single.yml up -d --build
+    #   B. 推送到 GitHub 后 CI 会构建镜像，把下面的 image 改成你的地址
+    #      image: ghcr.io/你的用户名/cfopt:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cfopt:local
+    container_name: cfopt
+    restart: unless-stopped
+
+    environment:
+      # ===== 多域名模式：TARGET_HOST 可以留空，全部在 Web 面板添加 =====
+      # 如果想要一个初始域名，取消下面两行注释
+      # TARGET_HOST: "ai2.kdns.fr"
+      # COLOS: "HKG"
+
+      # 关键：hosts 模式，不起 DNS
+      MODE: "hosts"
+
+      # 写入宿主机 /etc/hosts（通过下面的 volumes 挂载）
+      SYSTEM_HOSTS: "/hosts/etc-hosts"
+
+      # ===== 扫描参数（每个域名可在面板里单独调整） =====
+      WORKERS: "120"      # 并发，别超 150
+      TIMEOUT: "4"
+
+      # ===== 管理界面 =====
+      HTTP_PORT: "8080"
+
+    volumes:
+      - ./data:/data
+      # 只挂载 hosts 这一个文件，不碰 /etc 下的其他东西。
+      # 注意：单文件挂载时跨挂载点 rename 会 EBUSY，
+      # 代码已处理（自动退回原地写入）。
+      - /etc/hosts:/hosts/etc-hosts
+
+    ports:
+      # 飞牛OS Docker 界面里点这个端口打开管理面板：
+      #   http://飞牛OS的IP:8080/         域名管理（添加域名、状态、节点明细）
+      #   http://飞牛OS的IP:8080/status   运行状态 JSON
+      - "8080:8080"
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+

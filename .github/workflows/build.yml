@@ -1,0 +1,215 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ------------------------------------------------------------ 代码检查
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 安装检查工具
+        run: pip install ruff
+      - name: Ruff
+        run: ruff check src/
+      - name: 语法编译
+        run: python -m compileall -q src/
+
+  # ------------------------------------------------------------ 测试
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.8", "3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 安装
+        run: pip install -e .
+      - name: 单元测试
+        run: python -m unittest discover -s tests -v
+      - name: 冒烟测试（版本号）
+        run: cfopt --version
+      - name: 冒烟测试（守护进程能启动并响应 DNS）
+        shell: bash
+        run: |
+          export TARGET_HOST=example.com
+          export DATA_DIR="$PWD/tmpdata"
+          export DNS_LISTEN=127.0.0.1:15353
+          export HTTP_PORT=18080
+          export INTERVAL=86400
+          export SKIP_SCAN=1
+          mkdir -p "$DATA_DIR"
+          python -m cfopt.main &
+          PID=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:18080/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then echo "服务未在 30 秒内就绪"; kill $PID; exit 1; fi
+          curl -sf http://127.0.0.1:18080/health
+          curl -sf http://127.0.0.1:18080/status
+          kill $PID
+
+  # ------------------------------------------------------------ 构建分发包
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 构建 wheel 和 sdist
+        run: |
+          pip install --upgrade pip build
+          python -m build
+      - name: 校验产物
+        run: |
+          pip install twine
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 30
+
+  # ------------------------------------------------------------ 打单文件可执行
+  freeze:
+    needs: [lint, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: cfopt-linux-amd64
+          - os: ubuntu-24.04-arm
+            artifact: cfopt-linux-arm64
+          - os: windows-latest
+            artifact: cfopt-windows-amd64
+          - os: macos-latest
+            artifact: cfopt-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller .
+      - name: 打包
+        run: >
+          pyinstaller --onefile --name cfopt --clean --noconfirm
+          --collect-submodules cfopt
+          --hidden-import cfopt.main
+          --hidden-import cfopt.dnssrv
+          --hidden-import cfopt.probe
+          freeze_entry.py
+      - name: 冒烟测试（确认二进制能跑）
+        shell: bash
+        run: |
+          if [ -f dist/cfopt.exe ]; then ./dist/cfopt.exe --version; else ./dist/cfopt --version; fi
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/cfopt*
+          retention-days: 30
+
+  # ------------------------------------------------------------ Docker 镜像
+  docker:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # PR 只构建不推送，用于验证 Dockerfile 能过
+      - name: 登录 GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 提取元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------ 发布
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, freeze]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 整理产物
+        run: |
+          mkdir -p release
+          cp artifacts/dist/* release/ || true
+          for d in artifacts/cfopt-*; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            cd "$d"
+            # Windows 产物是 .exe，其余打 tar.gz
+            if ls *.exe >/dev/null 2>&1; then
+              zip -r "../../release/${name}.zip" . >/dev/null
+            else
+              tar -czf "../../release/${name}.tar.gz" . 2>/dev/null
+            fi
+            cd - >/dev/null
+          done
+          ls -lh release/
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
