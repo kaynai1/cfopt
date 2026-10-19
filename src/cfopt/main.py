@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """cfopt 守护进程：多域名优选 + Web 管理面板。
 
 启动流程：
@@ -10,16 +10,13 @@
   - 扫描失败 → 保留上一次结果
   - 从未扫出结果 → DNS 转发上游，站点照常可访问（只是没优化）
 """
-import json
 import os
 import sys
 import threading
 import time
-import traceback
 
 from . import __version__, web
 from .dnssrv import DnsServer
-from .probe import CF_V4, expand_ranges, nets_from_results, scan
 from .scanner import Scanner
 from .store import DomainStore
 

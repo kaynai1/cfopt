@@ -174,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(
                 f"{host} 似乎没有接入 Cloudflare：它解析到 "
                 f"{', '.join(detail[:3])}，不属于 Cloudflare 网段。"
-                f"请确认域名已托管到 Cloudflare，且 DNS 记录开启了小黄云（已代理）。")
+                "请确认域名已托管到 Cloudflare，且 DNS 记录开启了小黄云（已代理）。")
 
         try:
             d = self.store.add(host, colos=colos, top_n=top_n,
