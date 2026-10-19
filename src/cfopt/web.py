@@ -600,21 +600,26 @@ document.getElementById("host").addEventListener("keydown", function (e) {{
             for i, n in enumerate(nodes[:20]):
                 picked = n["ip"] in d["ips"]
                 pct = max(4, n["connect_ms"] / mx * 100)
+                # 注意：不要在 f-string 的表达式里嵌套引号。
+                # Python 3.11 及以下会报 "f-string expression part cannot
+                # include a backslash"。所以先算好字符串再插值。
+                cls = "pick" if picked else ""
+                colo_cls = "hit" if n["colo"] in d["colos"] else ""
+                tag = '<span class="tag">使用中</span>' if picked else ""
                 rows.append(
-                    f'<tr class="{"pick" if picked else ""}">'
+                    f'<tr class="{cls}">'
                     f'<td>{n["ip"]}</td>'
-                    f'<td class="colo {"hit" if n["colo"] in d["colos"] else ""}">'
-                    f'{n["colo"]}</td>'
+                    f'<td class="colo {colo_cls}">{n["colo"]}</td>'
                     f'<td>{n["connect_ms"]:.0f} ms</td>'
                     f'<td><div class="bar"><i style="width:{pct:.0f}%"></i></div></td>'
-                    f'<td>{"<span class=\'tag\'>使用中</span>" if picked else ""}</td>'
+                    f'<td>{tag}</td>'
                     f'</tr>')
             table = f"""<div class="sect">
   <div class="sect-t">候选节点 <span>按延迟排序，前 {min(len(nodes), 20)} 个
-    （共 {len(nodes)} 个命中 {','.join(d["colos"])}）</span></div>
+    （共 {len(nodes)} 个命中 {",".join(d["colos"])}）</span></div>
   <table class="nodes">
     <tr><th>IP</th><th>机房</th><th>握手</th><th>对比</th><th></th></tr>
-    {''.join(rows)}
+    {"".join(rows)}
   </table>
 </div>"""
         else:
@@ -622,10 +627,12 @@ document.getElementById("host").addEventListener("keydown", function (e) {{
 
         # ---- 机房分布
         dist = sorted(d["colos_found"].items(), key=lambda kv: -kv[1])[:8]
-        chips = "".join(
-            f'<span class="chip{" hit" if c in d["colos"] else ""}">{c} {n}</span>'
-            for c, n in dist)
-        dist_html = (f'<div class="chips">{chips}</div>' if chips else "")
+        chip_parts = []
+        for c, n in dist:
+            chip_cls = "chip hit" if c in d["colos"] else "chip"
+            chip_parts.append(f'<span class="{chip_cls}">{c} {n}</span>')
+        chips = "".join(chip_parts)
+        dist_html = f'<div class="chips">{chips}</div>' if chips else ""
 
         err = f'<div class="err">{d["last_error"]}</div>' if d["last_error"] else ""
         off = "" if d["enabled"] else " off"

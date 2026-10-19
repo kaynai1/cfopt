@@ -249,7 +249,7 @@ def cmd_verify(args):
 
     # 普通域名必须能正常解析，否则说明转发坏了
     rcode2, ips2 = query("www.baidu.com", args.server, args.port)
-    print(f"\n查询 www.baidu.com（验证转发）")
+    print("\n查询 www.baidu.com（验证转发）")
     if rcode2 == 0 and ips2:
         print(f"  ✅ 正常转发，返回 {len(ips2)} 条")
     else:

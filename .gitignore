@@ -28,3 +28,7 @@ Thumbs.db
 
 # 系统
 .env
+
+# 临时提交信息
+.git-commit-msg.tmp
+
