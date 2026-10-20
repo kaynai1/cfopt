@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """单元测试：不依赖外网，全部用本地构造的报文验证。"""
 import json
 import os
@@ -618,6 +618,7 @@ class TestScannerLogic(unittest.TestCase):
             store = DomainStore(os.path.join(d, "d.json"), log=lambda m: None)
             dom = store.add("a.com")
             dom.nets = ["104.17.183.0/24"]
+            dom.nets_colos = ["HKG"]
             s = Scanner(store, log=lambda m: None)
             captured = {}
 
@@ -836,6 +837,72 @@ class TestProgressState(unittest.TestCase):
         self.assertNotIn("progress", raw, "进度不应落盘")
 
 
+class TestNetsCacheInvalidation(unittest.TestCase):
+    """网段缓存必须和目标机房绑定。
+
+    真实故障：把机房从 NRT 改成 HKG 后，界面一直提示
+    「无 HKG 节点，实际分布 NRT,SIN,LAX,AMS,FRA」。
+    原因是缓存只按当时命中的机房生成，且一旦存在就永远只扫这些段，
+    所以无论怎么扫都出不来 HKG。
+    """
+
+    def setUp(self):
+        import tempfile
+        self.tmpdir = tempfile.mkdtemp()
+        from cfopt.store import DomainStore
+        self.store = DomainStore(os.path.join(self.tmpdir, "d.json"),
+                                 log=lambda m: None)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _cache_valid(self, domain):
+        """复刻 scanner 里的判定逻辑。"""
+        cache_colos = getattr(domain, "nets_colos", None) or []
+        return bool(domain.nets) and cache_colos == list(domain.colos)
+
+    def test_legacy_cache_without_marker_is_discarded(self):
+        """旧版本留下的缓存没有 nets_colos，必须作废重扫。"""
+        d = self.store.add("a.com", colos=["HKG"])
+        d.nets = ["104.16.0.0/24"]
+        d.nets_colos = []
+        self.assertFalse(self._cache_valid(d))
+
+    def test_cache_from_other_colo_is_discarded(self):
+        """缓存来自 NRT，目标改成 HKG，必须作废。"""
+        d = self.store.add("a.com", colos=["HKG"])
+        d.nets = ["104.16.0.0/24"]
+        d.nets_colos = ["NRT"]
+        self.assertFalse(self._cache_valid(d))
+
+    def test_matching_cache_is_reused(self):
+        """缓存与目标机房一致时才复用，保证快速扫描。"""
+        d = self.store.add("a.com", colos=["HKG"])
+        d.nets = ["104.16.0.0/24"]
+        d.nets_colos = ["HKG"]
+        self.assertTrue(self._cache_valid(d))
+
+    def test_multi_colo_order_matters(self):
+        """机房顺序变了也算变更（HKG,NRT 与 NRT,HKG 优先级不同）。"""
+        d = self.store.add("a.com", colos=["NRT", "HKG"])
+        d.nets = ["104.16.0.0/24"]
+        d.nets_colos = ["HKG", "NRT"]
+        self.assertFalse(self._cache_valid(d))
+
+    def test_nets_colos_persisted(self):
+        """nets_colos 要落盘，否则重启后又变成无标记的旧缓存。"""
+        d = self.store.add("a.com", colos=["HKG"])
+        d.nets = ["104.16.0.0/24"]
+        d.nets_colos = ["HKG"]
+        self.store.save()
+
+        from cfopt.store import DomainStore
+        store2 = DomainStore(self.store.path, log=lambda m: None)
+        got = store2.list()[0]
+        self.assertEqual(got.nets, ["104.16.0.0/24"])
+        self.assertEqual(got.nets_colos, ["HKG"])
+
+
 if __name__ == "__main__":
     unittest.main()
-

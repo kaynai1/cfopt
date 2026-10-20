@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """多域名配置的持久化存储。
 
 设计要点：
@@ -25,7 +25,7 @@ class Domain:
     FIELDS = ("id", "host", "colos", "top_n", "per_net", "interval",
               "enabled", "created_at", "ips", "nodes", "colos_found",
               "total_alive", "best_ms", "last_scan_at", "last_scan_ok",
-              "last_error", "nets")
+              "last_error", "nets", "nets_colos")
 
     def __init__(self, host, colos=None, top_n=2, per_net=2,
                  interval=21600, enabled=True, **kw):
@@ -50,6 +50,9 @@ class Domain:
         self.last_scan_ok = kw.get("last_scan_ok", False)
         self.last_error = kw.get("last_error", "")
         self.nets = kw.get("nets") or []      # 已发现的网段，用于快速复扫
+        # 这批网段是为哪个机房筛出来的。机房一改，缓存就必须作废，
+        # 否则会一直只扫旧机房的段，永远扫不到新机房。
+        self.nets_colos = kw.get("nets_colos") or []
         # 扫描进度（只在内存里，不落盘）：{done, total, alive, started}
         self.progress = None
         self._lock = threading.Lock()
@@ -91,7 +94,7 @@ class Domain:
             **{k: d[k] for k in ("id", "created_at", "ips", "nodes",
                                  "colos_found", "total_alive", "best_ms",
                                  "last_scan_at", "last_scan_ok",
-                                 "last_error", "nets") if k in d}
+                                 "last_error", "nets", "nets_colos") if k in d}
         )
 
     # ---------------------------------------------------------- 状态更新

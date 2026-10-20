@@ -44,9 +44,19 @@ class Scanner:
         host = domain.host
         self.log(f"[{host}] 开始扫描，目标机房 {','.join(domain.colos)}")
 
-        # 有网段缓存就只扫这些，快很多
-        cidrs = domain.nets if domain.nets else CF_V4
-        fast = bool(domain.nets)
+        # 网段缓存必须和目标机房绑定。
+        # 之前的 bug：缓存只按"当时命中的机房"生成，且一旦存在就永远只用它。
+        # 结果是把机房从 NRT 改成 HKG 后，缓存里全是 NRT 的段，
+        # 再怎么扫都只会看到 NRT/SIN/LAX，永远出不来 HKG。
+        cache_colos = getattr(domain, "nets_colos", None) or []
+        cache_valid = bool(domain.nets) and cache_colos == list(domain.colos)
+        if domain.nets and not cache_valid:
+            self.log(f"[{host}] 机房已变更（缓存来自 {','.join(cache_colos) or '未知'}），"
+                     f"丢弃网段缓存，改为全量扫描")
+            domain.nets = []
+
+        cidrs = domain.nets if cache_valid else CF_V4
+        fast = cache_valid
         ips = expand_ranges(cidrs, domain.per_net)
         self.log(f"[{host}] {'快速' if fast else '全量'}扫描，"
                  f"{len(ips)} 个候选 IP")
@@ -92,13 +102,23 @@ class Scanner:
                   "ttfb_ms": round(r["ttfb_ms"], 1)}
                  for r in picked]
 
-        # 首次全量扫描后记录网段，后续走快速模式
+        # 生成/更新网段缓存，并记下它对应的机房。
+        # 每轮全量扫描后都刷新，避免缓存长期停留在过期网段上。
         nets = domain.nets
         if not fast:
-            primary = domain.colos[0]
-            nets = nets_from_results(results, primary, limit=200)
+            nets = []
+            for colo in domain.colos:
+                part = nets_from_results(results, colo, limit=100)
+                if part:
+                    nets.extend(part)
             if not nets:
-                nets = nets_from_results(results, picked[0]["colo"], limit=200)
+                # 目标机房一个都没命中，退而记录命中数最多的机房
+                top_colo = max(dist.items(), key=lambda kv: kv[1])[0]
+                nets = nets_from_results(results, top_colo, limit=200)
+            if nets:
+                domain.nets_colos = list(domain.colos)
+                self.log(f"[{host}] 记录 {len(nets)} 个网段（对应机房 "
+                         f"{','.join(domain.colos)}）")
 
         domain.apply_scan(new_ips, dist, nets, nodes=nodes,
                           total_alive=len(results))
